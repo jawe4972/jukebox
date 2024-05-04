@@ -56,5 +56,5 @@ Some potential enhancements for the playlist manager include:
 
 - Ability to reorder songs within a playlist.
 - Saving and loading playlists from files.
-- Integration with music streaming services for a larger song library (I really would have liked to have added this functionality but I was struggling with its implementation. 
+- Integration with music streaming services for a larger song library (I really would have liked to have added this functionality but I was struggling with its implementation). 
 - Improved user interface with more advanced playback controls.
