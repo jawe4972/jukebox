@@ -1,0 +1,322 @@
+import time
+import threading
+import datetime
+import ipywidgets as widgets
+from IPython.display import display
+
+class Song:
+    """ song with artist, title, and duration."""
+    def __init__(self, artist, title, duration):
+        self.artist = artist
+        self.title = title
+        self.duration = duration
+        self.next = None
+        self.prev = None
+
+class Playlist:
+    """playlist of songs with various playback controls."""
+    def __init__(self, name):
+        self.name = name
+        self.head = None
+        self.tail = None
+        self.current_song = None
+        self.is_playing = False
+        self.repeat_mode = 0  # 0: No repeat, 1: Repeat song, 2: Repeat playlist
+        self.play_thread = None
+        self.lock = threading.Lock()
+        self.song_dict = {}
+        self.start_time = 0  # Time when the song started playing
+
+    def add_song(self, song):
+        """Add a song to the playlist."""
+        with self.lock:
+            if song.title in self.song_dict:
+                message_label.value = f"Song '{song.title}' is already in the '{self.name}' playlist."
+                return
+
+            if not self.head:
+                self.head = self.tail = song
+            else:
+                song.prev = self.tail
+                self.tail.next = song
+                self.tail = song
+            self.song_dict[song.title] = song
+            message_label.value = f"Added '{song.title}' to the '{self.name}' playlist."
+            self.update_dropdowns()
+
+    def remove_song(self, title):
+        """Remove a song from the playlist."""
+        with self.lock:
+            song = self.song_dict.get(title)
+            if song:
+                if song.prev:
+                    song.prev.next = song.next
+                if song.next:
+                    song.next.prev = song.prev
+                if song == self.head:
+                    self.head = song.next
+                if song == self.tail:
+                    self.tail = song.prev
+                if song == self.current_song:
+                    self.pause_song()
+                    self.current_song = None
+                del self.song_dict[title]
+                message_label.value = f"Removed '{title}' from the playlist."
+                self.update_dropdowns()
+            else:
+                message_label.value = f"Song '{title}' not found in the playlist."
+
+    def update_dropdowns(self):
+        """Update all dropdowns to reflect the current playlist."""
+        current_playlist_dropdown.options = [
+            f"{song.artist} - {song.title} ({str(song.duration)})"
+            for song in self.song_dict.values()
+        ]
+        remove_song_dropdown.options = current_playlist_dropdown.options
+
+    def toggle_playback(self):
+        """Toggle the playback state of the playlist."""
+        if self.is_playing:
+            self.pause_song()
+        else:
+            self.play_song()
+
+    def play_song(self):
+        """Start playing the song or resume playback."""
+        with self.lock:
+            if not self.current_song and self.head:
+                self.current_song = self.head
+            self.is_playing = True
+            self.start_countdown_thread()
+            self.display_current_song()
+
+    def pause_song(self):
+        """Pause the song playback."""
+        self.is_playing = False
+        if self.play_thread:
+            self.play_thread = None
+        duration_label.value = ""  # Clear the duration label
+
+    def toggle_repeat(self):
+        """Toggle the repeat mode between no repeat, repeat song, and repeat playlist."""
+        self.repeat_mode = (self.repeat_mode + 1) % 3
+        repeat_modes = ["No Repeat", "Repeat Song", "Repeat Playlist"]
+        repeat_button.description = f"Repeat: {repeat_modes[self.repeat_mode]}"
+
+    def start_countdown_thread(self):
+        """Start a thread to update the duration countdown."""
+        if self.play_thread and self.play_thread.is_alive():
+            return
+        self.start_time = time.time()
+        self.play_thread = threading.Thread(target=self.update_duration_countdown)
+        self.play_thread.daemon = True
+        self.play_thread.start()
+
+    def update_duration_countdown(self):
+        """Update the duration countdown for the current song."""
+        while self.is_playing and self.current_song:
+            elapsed_time = time.time() - self.start_time
+            remaining_time = self.current_song.duration.total_seconds() - elapsed_time
+            if remaining_time <= 0:
+                self.play_next_song()
+                if self.current_song:
+                    self.start_time = time.time()
+            else:
+                duration_label.value = f"Duration: {str(datetime.timedelta(seconds=int(remaining_time)))}"
+            time.sleep(1)
+
+    def play_next_song(self):
+        """Play the next song in the playlist."""
+        with self.lock:
+            if self.repeat_mode == 1:
+                self.current_song = self.current_song
+            elif not self.current_song.next:
+                if self.repeat_mode == 2:
+                    self.current_song = self.head
+                else:
+                    message_label.value = "End of playlist"
+                    self.pause_song()
+                    return
+            else:
+                self.current_song = self.current_song.next
+            self.display_current_song()
+
+    def play_previous_song(self):
+        """Play the previous song in the playlist."""
+        with self.lock:
+            if self.current_song.prev:
+                self.current_song = self.current_song.prev
+                self.display_current_song()
+            else:
+                message_label.value = "Beginning of playlist"
+
+    def display_current_song(self):
+        """Update the UI with the currently playing song."""
+        if self.current_song:
+            current_song_label.value = f"Now Playing: {self.current_song.artist} - {self.current_song.title}"
+            self.start_countdown_thread()
+        else:
+            current_song_label.value = "No song playing"
+            duration_label.value = "" 
+
+# Add predefined songs
+predefined_songs = [
+    Song("Ariana Grande", "We Can't Be Friends(Wait For Your Love)", datetime.timedelta(minutes=3, seconds=45)),
+    Song("Ariana Grande", "Yes, and?", datetime.timedelta(minutes=3, seconds=34)),
+    Song("Benson Boone", "Slow It Down", datetime.timedelta(minutes=2, seconds=42)),
+    Song("Beyonce", "Texas Hold 'Em", datetime.timedelta(minutes=3, seconds=53)),
+    Song("Beyonce", "Jolene", datetime.timedelta(minutes=3, seconds=9)),
+    Song("Beyonce", "Grown Woman", datetime.timedelta(minutes=5, seconds=10)),
+    Song("Beyonce", "Heated", datetime.timedelta(minutes=4, seconds=20)),
+    Song("Beyonce", "Cuff It", datetime.timedelta(minutes=3, seconds=44)),
+    Song("Billie Eilish", "What Was I Made For?", datetime.timedelta(minutes=3, seconds=41)),
+    Song("Dasha", "Austin", datetime.timedelta(minutes=2, seconds=51)),
+    Song("David Guetta/Bebe Rexha", "I'm Good (Blue)", datetime.timedelta(minutes=2, seconds=54)),
+    Song("David Kushner", "Daylight", datetime.timedelta(minutes=3, seconds=32)),
+    Song("Dua Lipa", "Dance The Night", datetime.timedelta(minutes=2, seconds=56)),
+    Song("Dua Lipa", "Houdini", datetime.timedelta(minutes=3, seconds=5)),
+    Song("Dua Lipa", "Training Season", datetime.timedelta(minutes=3, seconds=28)),
+    Song("Dua Lipa", "Illusion", datetime.timedelta(minutes=3, seconds=8)),
+    Song("Fleetwood Mac", "Dreams", datetime.timedelta(minutes=4, seconds=18)),
+    Song("Harry Styles", "As It Was", datetime.timedelta(minutes=2, seconds=46)),
+    Song("Hozier", "Too Sweet", datetime.timedelta(minutes=4, seconds=10)),
+    Song("Jennifer Lopez/Sean Paul", "Can't Get Enough (Dutty Remix)", datetime.timedelta(minutes=3, seconds=7)),
+    Song("Jessie Murph/Jelly Roll", "Wild Ones", datetime.timedelta(minutes=2, seconds=21)),
+    Song("Justin Timberlake/NSYNC", "Paradise", datetime.timedelta(minutes=4, seconds=26)),
+    Song("Justin Timberlake", "Selfish", datetime.timedelta(minutes=3, seconds=48)),
+    Song("Kehlani", "After Hours", datetime.timedelta(minutes=3, seconds=21)),
+    Song("Megan Thee Stallion/Renee Rapp", "Not My Fault", datetime.timedelta(minutes=2, seconds=51)),
+    Song("Michael Jackson", "Billie Jean", datetime.timedelta(minutes=4, seconds=53)),
+    Song("Miley Cyrus", "Flowers", datetime.timedelta(minutes=3, seconds=19)),
+    Song("Nicki Minaj/Lil Uzi Vert", "Everybody", datetime.timedelta(minutes=3, seconds=1)),
+    Song("Noah Kahan", "Stick Season", datetime.timedelta(minutes=3, seconds=1)),
+    Song("Olivia Rodrigo", "Obsessed", datetime.timedelta(minutes=2, seconds=49)),
+    Song("Olivia Rodrigo", "Vampire", datetime.timedelta(minutes=3, seconds=40)),
+    Song("Peggy Gou", "(It Goes Like) Nanana", datetime.timedelta(minutes=3, seconds=51)),
+    Song("Pharrell Williams/Swae Lee/Rauw Alejandro", "Airplane Tickets", datetime.timedelta(minutes=3, seconds=19)),
+    Song("Rema/Selena Gomez", "Calm Down", datetime.timedelta(minutes=3, seconds=58)),
+    Song("Renee Rapp", "Tummy Hurts", datetime.timedelta(minutes=2, seconds=48)),
+    Song("Kenya Grace", "Strangers", datetime.timedelta(minutes=2, seconds=52)),
+    Song("Sam Smith/Kim Petras", "Unholy", datetime.timedelta(minutes=2, seconds=36)),
+    Song("Sabrina Carpenter", "Espresso", datetime.timedelta(minutes=2, seconds=54)),
+    Song("SZA", "Saturn", datetime.timedelta(minutes=3, seconds=5)),
+    Song("Tate McRae", "Greedy", datetime.timedelta(minutes=2, seconds=11)),
+    Song("Taylor Swift", "Anti-Hero", datetime.timedelta(minutes=3, seconds=20)),
+    Song("Taylor Swift", "Cruel Summer", datetime.timedelta(minutes=2, seconds=57)),
+    Song("Taylor Swift/Post Malone", "Fortnight", datetime.timedelta(minutes=3, seconds=48)),
+    Song("Taylor Swift", "Thank You Aimee", datetime.timedelta(minutes=4, seconds=22)),
+    Song("Taylor Swift", "You're Losing Me", datetime.timedelta(minutes=4, seconds=37)),
+    Song("The Weeknd", "Blinding Lights", datetime.timedelta(minutes=3, seconds=19)),
+    Song("The Weeknd/Lily Rose Depp/JENNIE", "One Of The Girls", datetime.timedelta(minutes=4, seconds=4)),
+    Song("Tyla", "Art", datetime.timedelta(minutes=2, seconds=28)),
+    Song("Tyla", "Water", datetime.timedelta(minutes=3, seconds=19)),
+    Song("VCHA", "Only One", datetime.timedelta(minutes=2, seconds=55)),
+]
+
+# Create the UI elements
+message_label = widgets.Label()
+current_song_label = widgets.Label()
+duration_label = widgets.Label()
+remove_song_dropdown = widgets.Dropdown(options=[], description="Remove Song:")
+add_song_dropdown = widgets.Dropdown(options=[f"{song.artist} - {song.title} ({str(song.duration)})" for song in predefined_songs], description="Add Song:")
+playlist_dropdown = widgets.Dropdown(options=[], description="Select Playlist:")
+current_playlist_dropdown = widgets.Dropdown(options=[], description="Current Playlist:")
+create_playlist_text = widgets.Text(description="Playlist Name:")
+create_playlist_button = widgets.Button(description="Create Playlist")
+play_button = widgets.Button(description="Play/Pause")
+repeat_button = widgets.Button(description="Repeat: No Repeat")
+add_song_button = widgets.Button(description="Add Song")
+remove_song_button = widgets.Button(description="Remove Song")
+next_button = widgets.Button(description="Next")
+previous_button = widgets.Button(description="Previous")
+
+# Create a dictionary to store multiple playlists
+playlists = {}
+
+def create_playlist(b):
+    playlist_name = create_playlist_text.value
+    if playlist_name:
+        if playlist_name not in playlists:
+            playlists[playlist_name] = Playlist(playlist_name)
+            playlist_dropdown.options = list(playlists.keys())
+            message_label.value = f"Created playlist: {playlist_name}"
+        else:
+            message_label.value = f"Playlist '{playlist_name}' already exists."
+        create_playlist_text.value = ""
+
+def add_song_to_playlist(b):
+    selected_playlist = playlists.get(playlist_dropdown.value)
+    if selected_playlist:
+        # Extract the song details from the dropdown value
+        song_details = add_song_dropdown.value
+        # Find the song object that matches the dropdown selection
+        for song in predefined_songs:
+            if f"{song.artist} - {song.title} ({str(song.duration)})" == song_details:
+                selected_song = song
+                break
+        else:
+            message_label.value = "Selected song not found in predefined songs."
+            return
+
+        selected_playlist.add_song(selected_song)
+    else:
+        message_label.value = "Please select a playlist."
+
+def remove_song_from_playlist(b):
+    selected_playlist = playlists.get(playlist_dropdown.value)
+    if selected_playlist:
+        selected_title = remove_song_dropdown.value.split(" - ")[1].split(" (")[0]
+        selected_playlist.remove_song(selected_title)
+    else:
+        message_label.value = "Please select a playlist."
+
+def toggle_playback(b):
+    selected_playlist = playlists.get(playlist_dropdown.value)
+    if selected_playlist:
+        selected_playlist.toggle_playback()
+    else:
+        message_label.value = "Please select a playlist."
+
+def toggle_repeat(b):
+    selected_playlist = playlists.get(playlist_dropdown.value)
+    if selected_playlist:
+        selected_playlist.toggle_repeat()
+    else:
+        message_label.value = "Please select a playlist."
+
+def play_next_song(b):
+    selected_playlist = playlists.get(playlist_dropdown.value)
+    if selected_playlist:
+        selected_playlist.play_next_song()
+    else:
+        message_label.value = "Please select a playlist."
+
+def play_previous_song(b):
+    selected_playlist = playlists.get(playlist_dropdown.value)
+    if selected_playlist:
+        selected_playlist.play_previous_song()
+    else:
+        message_label.value = "Please select a playlist."
+
+def update_current_playlist(change):
+    selected_playlist = playlists.get(playlist_dropdown.value)
+    if selected_playlist:
+        selected_playlist.update_dropdowns()
+        current_playlist_dropdown.value = playlist_dropdown.value
+        if selected_playlist.current_song:
+            current_song_label.value = f"Now Playing: {selected_playlist.current_song.artist} - {selected_playlist.current_song.title}"
+        else:
+            current_song_label.value = "No song playing"
+        duration_label.value = ""  
+
+create_playlist_button.on_click(create_playlist)
+play_button.on_click(toggle_playback)
+repeat_button.on_click(toggle_repeat)
+add_song_button.on_click(add_song_to_playlist)
+remove_song_button.on_click(remove_song_from_playlist)
+next_button.on_click(play_next_song)
+previous_button.on_click(play_previous_song)
+playlist_dropdown.observe(update_current_playlist, names='value')
+
+# Display UI elements
+display(message_label, create_playlist_text, create_playlist_button, playlist_dropdown, current_playlist_dropdown, current_song_label, duration_label, add_song_dropdown, add_song_button, remove_song_dropdown, remove_song_button, play_button, repeat_button, next_button, previous_button)
